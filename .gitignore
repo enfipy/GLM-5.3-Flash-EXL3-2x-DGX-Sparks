@@ -23,3 +23,6 @@ extensions/cooperative_moe/*.so
 
 # Nomad deployment: private control-host access stays outside the tree
 nomad/control/
+
+# Local overrides of nomad/env
+nomad/env.local

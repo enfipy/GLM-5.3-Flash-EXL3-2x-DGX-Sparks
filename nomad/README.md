@@ -5,17 +5,36 @@ This directory runs the upstream recipe as one Nomad job instead of
 (Enfios), tensor parallel 2 over the ConnectX-7 RoCE link, serving
 `http://100.76.243.97:8888/v1` (tailnet only) as model id `glm-5.3-flash`.
 
+## From a fresh head
+
+1. Clone this fork (branch `nomad-2x-sparks`) anywhere, e.g. `~/models/glm53f`.
+2. Put the private control-host access outside the tree:
+   `~/.config/glm53-nomad/control/control-ssh` (SSH wrapper to the control
+   host) and `nomad-remote` (exports `NOMAD_ADDR`, `NOMAD_CACERT`,
+   `NOMAD_TLS_SERVER_NAME`, `NOMAD_TOKEN` and execs `nomad "$@"` there).
+3. Review `nomad/env` (weights root, worker paths, node IDs, API, image,
+   generator flags); put machine-specific overrides in `nomad/env.local`.
+4. Download the weights into the root from `env`:
+   `HF_HOME=$GLM53_WEIGHTS/hf ./download.sh` (target checkpoint + DFlash2
+   drafter, about 166 GB). Optional ABLIT transplant tensors go to
+   `$GLM53_WEIGHTS/ablit-transplant/` (`ablit/fetch_transplant.py`).
+5. `nomad/setup.sh`: checks the layout, places the cooperative kernel runtime
+   next to the weights, loads the image from `$GLM53_WEIGHTS/images/` or tells
+   you how to build it, and registers the host volumes on both nodes.
+6. `nomad/model.sh start`, then `nomad/model.sh status` until `API READY`,
+   then `nomad/model.sh warmup` once.
+
+The worker (enfis2) needs the same weights under `GLM53_WORKER_MODELS`, the
+image loaded, and `/dev/infiniband` (`modprobe ib_uverbs` after a reboot until
+the Enfios image loads it itself).
+
 ```bash
-nomad/model.sh start [--vision] [--no-ablit]   # submit the job (text-only, ABLIT transplant on by default)
+nomad/model.sh start [--vision] [--no-ablit] [--no-gen]   # regenerates the job from this checkout, then submits
 nomad/model.sh status             # allocations + API health
-nomad/model.sh warmup             # upstream boot-shape warmup, run once after READY
+nomad/model.sh warmup             # upstream boot-shape warmup, once after READY
+nomad/model.sh bench --concurrency 1,2,4 --repeats 3      # sparkDash-protocol prose decode benchmark
 nomad/model.sh stop
 ```
-
-`model.sh` needs the private control-host wrapper outside the tree:
-`~/.config/glm53-nomad/control/control-ssh` (SSH to the control host) and
-`nomad-remote` (Nomad address, CA and token on the control host). Override
-the location with `GLM53_NOMAD_CONTROL`.
 
 ## Files
 

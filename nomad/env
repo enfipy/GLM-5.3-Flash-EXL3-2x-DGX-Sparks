@@ -1,0 +1,26 @@
+# Deployment settings, sourced by nomad/model.sh and nomad/setup.sh.
+# Copy overrides into nomad/env.local (ignored by git) instead of editing here.
+
+# Head (enfis1) weights root. Layout:
+#   hf/                HF_HOME: hub/models--Mia-AiLab--GLM-5.3-Flash-EXL3-TR3-4bpw, hub/models--incoai--GLM-5.3-Flash-DFlash2
+#   hf/cooperative_moe/ cooperative kernel runtime (placed by setup.sh from nomad/cooperative_moe)
+#   ablit-transplant/  ABLIT transplant tensors (L15..L45 .bin)
+#   cache/             persistent Triton/TileLang/inductor caches for the head
+#   images/            loadable copies of locally built images (docker save)
+GLM53_WEIGHTS="$HOME/models/weights/glm53f"
+
+# Worker (enfis2, Enfios) paths as registered on that node.
+GLM53_WORKER_MODELS=/state/models/glm53-exl3-hf
+GLM53_WORKER_CACHE=/state/models/glm53-cache
+
+# Nomad node IDs of the two ranks and the served API (head Tailscale address).
+GLM53_HEAD_NODE=71d9e2b7-8b36-c147-9c42-9db25193c21b
+GLM53_WORKER_NODE=9b5e3f32-d773-5b0e-449f-2d51ffa40067
+GLM53_API=http://100.76.243.97:8888
+
+# Container image on both nodes and the generator flags for the job file.
+GLM53_IMAGE=glm53-flash-sm121:thin-ca85576
+GLM53_GEN_FLAGS="--coop --fast --instanttensor"
+
+# Private control-host access (SSH wrapper + Nomad helper), outside the tree.
+GLM53_NOMAD_CONTROL="$HOME/.config/glm53-nomad/control"
