@@ -20,3 +20,6 @@ results/
 
 # Cooperative MoE native artifacts are staged, not committed.
 extensions/cooperative_moe/*.so
+
+# Nomad deployment: private control-host access stays outside the tree
+nomad/control/
