@@ -6,7 +6,7 @@ This directory runs the upstream recipe as one Nomad job instead of
 `http://100.76.243.97:8888/v1` (tailnet only) as model id `glm-5.3-flash`.
 
 ```bash
-nomad/model.sh start [--vision]   # submit the job (text-only by default)
+nomad/model.sh start [--vision] [--no-ablit]   # submit the job (text-only, ABLIT transplant on by default)
 nomad/model.sh status             # allocations + API health
 nomad/model.sh warmup             # upstream boot-shape warmup, run once after READY
 nomad/model.sh stop
@@ -92,6 +92,20 @@ loadable copy is kept at
 
 On this pair the thin-decode path is within the run-to-run noise (2-5
 guard throttles per window); cooperative + thin-decode gave the best peaks and
-stays deployed. The head keeps Triton/TileLang/inductor caches on the
+stays deployed. `--no-ablit` (ABLIT verified off in both containers) measured
+x1 32.0 / 25.3 / 32.9, x2 41.5 / 46.4 / 43.3, x4 65.9 / 59.5 / 59.9: the same
+band, so abliteration is not what separates this kit from the published table;
+the worker clock policy is.
+
+## Load time
+
+The published ~60 s load is InstantTensor (`--load-format instanttensor`).
+`gen_hcl.py --instanttensor` enables it with
+`INSTANTTENSOR_MAX_FREE_MEM_USAGE=0.9` on both ranks; the loader sizes its
+staging buffer from the CUDA free-memory reading, and a stale reading right
+after a failed container once made it refuse a 1.27 GB buffer. With it and the
+persistent head cache: weights 44.9 s, model loading 52.8 s, submit to healthy
+4 min 06 s, warmup 65 s (was 306 s / 10.5-13 min / ~100 s), and x1 33.2 / 34.8,
+x4 aggregate 68.4 / 65.9 right after. This is the deployed configuration. The head keeps Triton/TileLang/inductor caches on the
 persistent `glm53-head-cache` volume (`/home/god/models/weights/glm53f/cache`)
 so restarts do not recompile them.

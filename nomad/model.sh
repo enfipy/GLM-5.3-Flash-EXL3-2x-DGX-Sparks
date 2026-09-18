@@ -9,9 +9,15 @@ control="$control_dir/control-ssh"
 nomad() { "$control" bash -s -- "$@" < "$control_dir/nomad-remote"; }
 case "${1:-start}" in
  start)
-  vision=false
-  if [[ ${2:-} == --vision && $# == 2 ]]; then vision=true
-  elif [[ $# -gt 1 ]]; then echo "Usage: $0 start [--vision]" >&2; exit 2; fi
+  vision=false; ablit=true
+  shift
+  for arg in "$@"; do
+    case "$arg" in
+      --vision) vision=true ;;
+      --no-ablit) ablit=false ;;
+      *) echo "Usage: $0 start [--vision] [--no-ablit]" >&2; exit 2 ;;
+    esac
+  done
   if ! systemctl is-active --quiet cloud-ctrl-nomad; then
     echo "Cannot start: cloud-ctrl-nomad is not running on enfis1." >&2
     echo "Inspect: journalctl -u cloud-ctrl-nomad -b --no-pager -n 30" >&2
@@ -23,8 +29,8 @@ case "${1:-start}" in
   fi
   "$control" 'umask 077; cat > /tmp/glm53-default.nomad.hcl' < "$dir/glm53.nomad.hcl"
   submit="$(date -u +%Y%m%dT%H%M%SZ)"
-  nomad job validate -var="vision=$vision" -var="submit=$submit" /tmp/glm53-default.nomad.hcl
-  nomad job run -detach -var="vision=$vision" -var="submit=$submit" /tmp/glm53-default.nomad.hcl
+  nomad job validate -var="vision=$vision" -var="ablit=$ablit" -var="submit=$submit" /tmp/glm53-default.nomad.hcl
+  nomad job run -detach -var="vision=$vision" -var="ablit=$ablit" -var="submit=$submit" /tmp/glm53-default.nomad.hcl
   python3 - "$vision" <<'PICONFIG'
 import json,sys,pathlib
 p=pathlib.Path.home()/".pi/agent/models.json"
@@ -58,5 +64,5 @@ PICONFIG
     echo "API NOT READY"
   fi
   ;;
- *) echo "Usage: $0 {start|stop|status|warmup}" >&2; exit 2 ;;
+ *) echo "Usage: $0 {start [--vision] [--no-ablit]|stop|status|warmup}" >&2; exit 2 ;;
 esac

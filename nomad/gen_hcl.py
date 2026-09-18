@@ -14,6 +14,7 @@ with ./model.sh start.
   python3 nomad/gen_hcl.py --coop          # nomad/cooperative_moe/exl3-cooperative.py
   python3 nomad/gen_hcl.py --image IMAGE   # switch the container image on both ranks
   python3 nomad/gen_hcl.py --fast          # thin-decode kernels (image built from this Dockerfile)
+  python3 nomad/gen_hcl.py --instanttensor # direct-I/O weight loading (about 60 s instead of 300 s)
 """
 import argparse, base64, gzip, io, pathlib, re, subprocess, sys, tarfile
 
@@ -34,6 +35,7 @@ def main() -> None:
     ap.add_argument("--coop", action="store_true", help="embed nomad/cooperative_moe/exl3-cooperative.py as exl3.py")
     ap.add_argument("--image", help="container image reference for both ranks")
     ap.add_argument("--fast", action="store_true", help="GLM53_EXL3_MOE_FAST=1 (needs an image built with overlay/patch_exl3_decode_pipeline.py)")
+    ap.add_argument("--instanttensor", action="store_true", help="--load-format instanttensor (direct-I/O weight loading; image must ship the instanttensor wheel)")
     a = ap.parse_args()
 
     order = overlay_order(ROOT / "start.sh")
@@ -77,6 +79,17 @@ def main() -> None:
     text, n = re.subn(r'GLM53_EXL3_MOE_FAST = "[01]"', f'GLM53_EXL3_MOE_FAST = "{1 if a.fast else 0}"', text)
     if n != 2:
         sys.exit("expected two GLM53_EXL3_MOE_FAST settings")
+    # InstantTensor sizes its staging buffer from the CUDA free-memory reading at
+    # load time; keep the loader flag and its budget fraction together.
+    text = text.replace('"--enable-prefix-caching", "--load-format", "instanttensor",', '"--enable-prefix-caching",')
+    text = re.sub(r'        INSTANTTENSOR_MAX_FREE_MEM_USAGE = "[0-9.]+"\n', '', text)
+    if a.instanttensor:
+        text, n = re.subn(r'"--enable-prefix-caching",', '"--enable-prefix-caching", "--load-format", "instanttensor",', text)
+        if n != 2:
+            sys.exit("expected two --enable-prefix-caching args")
+        text, n = re.subn(r'(        DEFAULT_MAX_NEW_TOKENS = "65536"\n)', r'\1        INSTANTTENSOR_MAX_FREE_MEM_USAGE = "0.9"\n', text)
+        if n != 2:
+            sys.exit("expected two DEFAULT_MAX_NEW_TOKENS settings")
     a.out.write_text(text)
     print(f"wrote {a.out} ({len(text)} bytes): {len(members)} payload members, exl3={'cooperative' if a.coop else 'stock'}, upstream {rev}", file=sys.stderr)
 
