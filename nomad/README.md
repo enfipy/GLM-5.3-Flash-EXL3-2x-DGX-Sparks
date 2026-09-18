@@ -38,11 +38,15 @@ the location with `GLM53_NOMAD_CONTROL`.
   good prose runs, +2 min startup (native prepare). The packaged GPU gate
   passed on both nodes; the maintainer's frozen numerical study does not
   cover this rebuild.
-- `volumes/` — dynamic host volume registrations (`nomad volume create`):
+- Every `model.sh start` passes `-var submit=<timestamp>`, so each start is a
+  new job version and both groups get fresh allocations even when the previous
+  ones are `failed` under the job's no-reschedule policy (typical after a node
+  reboot). The head keeps its caches on the allocation's ephemeral disk; the
+  `glm53-cache` host volume is only mounted on the worker.
+- `volumes/` — dynamic host volume registrations (`nomad volume register`):
   enfis1 models at `/home/god/models/weights/glm53f/hf`, ablit transplant
   tensors at `/home/god/models/weights/glm53f/ablit-transplant`; enfis2 under
-  `/state/models/`. The head cache volume is `/dev/shm/glm53-cache`
-  (recreated by `model.sh start`).
+  `/state/models/`.
 - `decode_bench.py` — sparkDash Decode protocol (prose, 400 tokens,
   temperature 0, thinking off; per-stream and aggregate tok/s).
 - `acc_runs.py` — per-run DFlash acceptance from `/metrics`.

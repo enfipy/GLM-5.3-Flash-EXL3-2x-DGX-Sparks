@@ -21,10 +21,10 @@ case "${1:-start}" in
     echo "Cannot start: Docker is unavailable." >&2
     exit 1
   fi
-  mkdir -p /dev/shm/glm53-cache
   "$control" 'umask 077; cat > /tmp/glm53-default.nomad.hcl' < "$dir/glm53.nomad.hcl"
-  nomad job validate -var="vision=$vision" /tmp/glm53-default.nomad.hcl
-  nomad job run -detach -var="vision=$vision" /tmp/glm53-default.nomad.hcl
+  submit="$(date -u +%Y%m%dT%H%M%SZ)"
+  nomad job validate -var="vision=$vision" -var="submit=$submit" /tmp/glm53-default.nomad.hcl
+  nomad job run -detach -var="vision=$vision" -var="submit=$submit" /tmp/glm53-default.nomad.hcl
   python3 - "$vision" <<'PICONFIG'
 import json,sys,pathlib
 p=pathlib.Path.home()/".pi/agent/models.json"

@@ -2,10 +2,20 @@ variable "vision" {
   type = bool
   default = false
 }
+# Set by model.sh to the submission time so every start is a new job version:
+# both groups get fresh allocations even when a previous one is failed under
+# the no-reschedule policy (for example after a node reboot).
+variable "submit" {
+  type = string
+  default = ""
+}
 
 job "glm53" {
   datacenters = ["replace-me", "dc1"]
   type = "service"
+  meta {
+    submit = var.submit
+  }
   group "head" {
     count = 1
     ephemeral_disk { size = 16384 }
@@ -35,10 +45,6 @@ job "glm53" {
       type = "host"
       source = "glm53-models"
       read_only = true
-    }
-    volume "cache" {
-      type = "host"
-      source = "glm53-cache"
     }
     volume "ablit-transplant" {
       type = "host"
@@ -96,10 +102,6 @@ GLM53START
         volume = "models"
         destination = "/models"
         read_only = true
-      }
-      volume_mount {
-        volume = "cache"
-        destination = "/unused-host-cache"
       }
       volume_mount {
         volume = "ablit-transplant"
