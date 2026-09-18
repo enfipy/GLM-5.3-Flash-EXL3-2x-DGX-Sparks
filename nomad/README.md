@@ -71,5 +71,27 @@ the location with `GLM53_NOMAD_CONTROL`.
 | cooperative MoE | 30-34 (some runs 21-24) | 46-47 | 51-68 | 13 min 01 s |
 
 Upstream's published table (two stock Ubuntu Sparks, ABLIT off): x1 36-37,
-x2 51.1, x4 75.3; the later thin-decode kernels (`GLM53_EXL3_MOE_FAST=1`,
-40 / 78 tok/s) need an image built from the current Dockerfile.
+x2 51.1, x4 75.3, and 40 / 78 with the thin-decode kernels.
+
+## Thin-decode image (2026-09-18)
+
+The published GHCR image predates `overlay/patch_exl3_decode_pipeline.py`, so
+`GLM53_EXL3_MOE_FAST=1` fails closed on it. `glm53-flash-sm121:thin-ca85576`
+was built from this tree with BuildKit (`docker buildx build --load
+--build-arg GLM53_RECIPE_STAMP=local-ca85576-thin`; the legacy builder skips
+the Dockerfile's heredoc steps and produces an image without the `exl3`
+quantization registration). The image lives only on the two nodes; a
+loadable copy is kept at
+`/home/god/models/weights/glm53f/images/glm53-flash-sm121-thin-ca85576.tar`
+(`docker load -i`). Same protocol, three runs each, worker capped, ABLIT on:
+
+| Config | x1 stream | x2 aggregate | x4 aggregate |
+|---|---:|---:|---:|
+| stock + thin-decode | 30.1, 32.3, 18.4 | 41.9, 33.2, 45.0 | 57.1, 50.3, 52.3 |
+| cooperative + thin-decode (current) | 32.5, 23.7, 32.6 | 35.6, 46.0, 35.6 | 55.3, 70.2, 55.0 |
+
+On this pair the thin-decode path is within the run-to-run noise (2-5
+guard throttles per window); cooperative + thin-decode gave the best peaks and
+stays deployed. The head keeps Triton/TileLang/inductor caches on the
+persistent `glm53-head-cache` volume (`/home/god/models/weights/glm53f/cache`)
+so restarts do not recompile them.

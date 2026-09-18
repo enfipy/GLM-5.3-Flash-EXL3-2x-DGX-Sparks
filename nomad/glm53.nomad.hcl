@@ -46,6 +46,10 @@ job "glm53" {
       source = "glm53-models"
       read_only = true
     }
+    volume "cache" {
+      type = "host"
+      source = "glm53-head-cache"
+    }
     volume "ablit-transplant" {
       type = "host"
       source = "glm53-ablit-transplant"
@@ -82,14 +86,14 @@ for patch in ['patch_glm_video_placeholders', 'patch_suppress_stops_in_reasoning
 draft=pathlib.Path('/models/hub/models--incoai--GLM-5.3-Flash-DFlash2/snapshots/dc77ff1c99eeb2df044ee3d4f0094eb033fee410')
 assert (draft/"config.json").is_file(), "Missing DFlash config"
 assert (draft/"model.safetensors").stat().st_size > 1000000000, "Missing DFlash weights"
-print("[glm53-optimized] upstream ca85576; patches applied; DFlash weights available",flush=True)
+print("[glm53-optimized] upstream afd6b66; patches applied; DFlash weights available",flush=True)
 if sys.argv[1:] == ["--preflight"]:
     sys.exit(0)
 os.execvp("vllm",["vllm"]+sys.argv[1:])
 GLM53START
       }
       config {
-        image = "ghcr.io/miaai-lab/glm-5.3-flash-2x-dgx-sparks:exl3-instanttensor"
+        image = "glm53-flash-sm121:thin-ca85576"
         command = "python3"
         entrypoint = []
         args = concat(["/local/start-optimized.py", "serve", "/models/hub/models--Mia-AiLab--GLM-5.3-Flash-EXL3-TR3-4bpw/snapshots/25a44fdbf16862a46b7cc9921142c6c81350af2f", "--served-model-name", "glm-5.3-flash", "--tensor-parallel-size", "2", "--nnodes", "2", "--node-rank", "0", "--master-addr", "10.100.200.1", "--master-port", "29521", "--distributed-executor-backend", "mp", "--quantization", "exl3", "--gpu-memory-utilization", "0.85", "--max-model-len", "850000", "--max-num-seqs", "4", "--max-num-batched-tokens", "7168", "--enable-prefix-caching", "--kv-cache-dtype", "fp8", "--no-enable-flashinfer-autotune", "--tool-call-parser", "glm47", "--enable-auto-tool-choice", "--reasoning-parser", "glm45", "--default-chat-template-kwargs", "{\"enable_thinking\":false}", "--chat-template", "/opt/glm53/chat_template.jinja", "--host", "100.76.243.97", "--port", "8888", "--speculative-config", "{\"method\":\"dflash\",\"model\":\"/models/hub/models--incoai--GLM-5.3-Flash-DFlash2/snapshots/dc77ff1c99eeb2df044ee3d4f0094eb033fee410\",\"num_speculative_tokens\":7,\"kv_cache_dtype\":\"auto\",\"draft_sample_method\":\"probabilistic\",\"rejection_sample_method\":\"standard\",\"draft_tensor_parallel_size\":2}", "--cudagraph-capture-sizes", "1", "2", "3", "4", "5", "6", "8", "9", "10", "12", "15", "16", "20", "24", "32", "--kv-cache-memory-bytes", "15032385536"], var.vision ? ["--skip-mm-profiling", "--mm-processor-cache-gb", "0", "--mm-processor-kwargs", "{\"max_image_tokens\": 1024}", "--limit-mm-per-prompt", "{\"image\": 4, \"video\": 0}"] : ["--language-model-only"])
@@ -102,6 +106,10 @@ GLM53START
         volume = "models"
         destination = "/models"
         read_only = true
+      }
+      volume_mount {
+        volume = "cache"
+        destination = "/cache"
       }
       volume_mount {
         volume = "ablit-transplant"
@@ -123,12 +131,12 @@ GLM53START
         HF_HUB_OFFLINE = "1"
         TRANSFORMERS_OFFLINE = "1"
         HF_HOME = "/models"
-        VLLM_CACHE_ROOT = "/alloc/glm53-cache/vllm"
-        TRITON_CACHE_DIR = "/alloc/glm53-cache/triton"
-        TILELANG_CACHE_DIR = "/alloc/glm53-cache/tilelang"
-        XDG_CACHE_HOME = "/alloc/glm53-cache"
-        CUDA_CACHE_PATH = "/alloc/glm53-cache/nv"
-        TORCHINDUCTOR_CACHE_DIR = "/alloc/glm53-cache/torchinductor"
+        VLLM_CACHE_ROOT = "/cache/vllm"
+        TRITON_CACHE_DIR = "/cache/triton"
+        TILELANG_CACHE_DIR = "/cache/tilelang"
+        XDG_CACHE_HOME = "/cache"
+        CUDA_CACHE_PATH = "/cache/nv"
+        TORCHINDUCTOR_CACHE_DIR = "/cache/torchinductor"
         PYTHONDONTWRITEBYTECODE = "1"
         VLLM_NO_USAGE_STATS = "1"
         DO_NOT_TRACK = "1"
@@ -155,7 +163,7 @@ GLM53START
         GLM53_KV_CAPACITY_LOG = "1"
         GLM53_EXPOSE_CACHE_RESET = "0"
         GLM53_SPINWAIT_MS = "stock"
-        GLM53_EXL3_MOE_FAST = "0"
+        GLM53_EXL3_MOE_FAST = "1"
         GLM53_DEFAULT_REASONING_EFFORT = ""
         GLM53_ADAPTIVE_K_ALPHA = "0.25"
         GLM53_ADAPTIVE_K_MARGIN = "1.0"
@@ -170,7 +178,7 @@ GLM53START
         GLM53_DENSE_FP8 = "dense,kda"
         GLM53_ADAPTIVE_K = "ema"
         GLM53_ADAPTIVE_K_SET = "2,4,7"
-        GLM53_ADAPTIVE_K_FILE = "/alloc/glm53-cache/vllm/glm53_adaptive_k.json"
+        GLM53_ADAPTIVE_K_FILE = "/cache/vllm/glm53_adaptive_k.json"
         ABLIT = "1"
         ABLIT_METHOD = "transplant"
         VLLM_HOST_IP = "10.100.200.1"
@@ -244,14 +252,14 @@ for patch in ['patch_glm_video_placeholders', 'patch_suppress_stops_in_reasoning
 draft=pathlib.Path('/models/hub/models--incoai--GLM-5.3-Flash-DFlash2/snapshots/dc77ff1c99eeb2df044ee3d4f0094eb033fee410')
 assert (draft/"config.json").is_file(), "Missing DFlash config"
 assert (draft/"model.safetensors").stat().st_size > 1000000000, "Missing DFlash weights"
-print("[glm53-optimized] upstream ca85576; patches applied; DFlash weights available",flush=True)
+print("[glm53-optimized] upstream afd6b66; patches applied; DFlash weights available",flush=True)
 if sys.argv[1:] == ["--preflight"]:
     sys.exit(0)
 os.execvp("vllm",["vllm"]+sys.argv[1:])
 GLM53START
       }
       config {
-        image = "ghcr.io/miaai-lab/glm-5.3-flash-2x-dgx-sparks:exl3-instanttensor"
+        image = "glm53-flash-sm121:thin-ca85576"
         command = "python3"
         entrypoint = []
         args = concat(["/local/start-optimized.py", "serve", "/models/hub/models--Mia-AiLab--GLM-5.3-Flash-EXL3-TR3-4bpw/snapshots/25a44fdbf16862a46b7cc9921142c6c81350af2f", "--served-model-name", "glm-5.3-flash", "--tensor-parallel-size", "2", "--nnodes", "2", "--node-rank", "1", "--master-addr", "10.100.200.1", "--master-port", "29521", "--distributed-executor-backend", "mp", "--quantization", "exl3", "--gpu-memory-utilization", "0.85", "--max-model-len", "850000", "--max-num-seqs", "4", "--max-num-batched-tokens", "7168", "--enable-prefix-caching", "--kv-cache-dtype", "fp8", "--no-enable-flashinfer-autotune", "--tool-call-parser", "glm47", "--enable-auto-tool-choice", "--reasoning-parser", "glm45", "--default-chat-template-kwargs", "{\"enable_thinking\":false}", "--chat-template", "/opt/glm53/chat_template.jinja", "--headless", "--speculative-config", "{\"method\":\"dflash\",\"model\":\"/models/hub/models--incoai--GLM-5.3-Flash-DFlash2/snapshots/dc77ff1c99eeb2df044ee3d4f0094eb033fee410\",\"num_speculative_tokens\":7,\"kv_cache_dtype\":\"auto\",\"draft_sample_method\":\"probabilistic\",\"rejection_sample_method\":\"standard\",\"draft_tensor_parallel_size\":2}", "--cudagraph-capture-sizes", "1", "2", "3", "4", "5", "6", "8", "9", "10", "12", "15", "16", "20", "24", "32", "--kv-cache-memory-bytes", "15032385536"], var.vision ? ["--skip-mm-profiling", "--mm-processor-cache-gb", "0", "--mm-processor-kwargs", "{\"max_image_tokens\": 1024}", "--limit-mm-per-prompt", "{\"image\": 4, \"video\": 0}"] : ["--language-model-only"])
@@ -321,7 +329,7 @@ GLM53START
         GLM53_KV_CAPACITY_LOG = "1"
         GLM53_EXPOSE_CACHE_RESET = "0"
         GLM53_SPINWAIT_MS = "stock"
-        GLM53_EXL3_MOE_FAST = "0"
+        GLM53_EXL3_MOE_FAST = "1"
         GLM53_DEFAULT_REASONING_EFFORT = ""
         GLM53_ADAPTIVE_K_ALPHA = "0.25"
         GLM53_ADAPTIVE_K_MARGIN = "1.0"

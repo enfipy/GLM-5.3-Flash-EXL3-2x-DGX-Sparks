@@ -13,6 +13,7 @@ with ./model.sh start.
   python3 nomad/gen_hcl.py                 # stock exl3.py
   python3 nomad/gen_hcl.py --coop          # nomad/cooperative_moe/exl3-cooperative.py
   python3 nomad/gen_hcl.py --image IMAGE   # switch the container image on both ranks
+  python3 nomad/gen_hcl.py --fast          # thin-decode kernels (image built from this Dockerfile)
 """
 import argparse, base64, gzip, io, pathlib, re, subprocess, sys, tarfile
 
@@ -32,6 +33,7 @@ def main() -> None:
     ap.add_argument("--out", type=pathlib.Path, default=HERE / "glm53.nomad.hcl")
     ap.add_argument("--coop", action="store_true", help="embed nomad/cooperative_moe/exl3-cooperative.py as exl3.py")
     ap.add_argument("--image", help="container image reference for both ranks")
+    ap.add_argument("--fast", action="store_true", help="GLM53_EXL3_MOE_FAST=1 (needs an image built with overlay/patch_exl3_decode_pipeline.py)")
     a = ap.parse_args()
 
     order = overlay_order(ROOT / "start.sh")
@@ -72,6 +74,9 @@ def main() -> None:
         text, n = re.subn(r'image = "[^"]+"', f'image = "{a.image}"', text)
         if n != 2:
             sys.exit("expected two image settings")
+    text, n = re.subn(r'GLM53_EXL3_MOE_FAST = "[01]"', f'GLM53_EXL3_MOE_FAST = "{1 if a.fast else 0}"', text)
+    if n != 2:
+        sys.exit("expected two GLM53_EXL3_MOE_FAST settings")
     a.out.write_text(text)
     print(f"wrote {a.out} ({len(text)} bytes): {len(members)} payload members, exl3={'cooperative' if a.coop else 'stock'}, upstream {rev}", file=sys.stderr)
 
