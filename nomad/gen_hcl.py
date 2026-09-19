@@ -15,6 +15,9 @@ with ./model.sh start.
   python3 nomad/gen_hcl.py --image IMAGE   # switch the container image on both ranks
   python3 nomad/gen_hcl.py --fast          # thin-decode kernels (image built from this Dockerfile)
   python3 nomad/gen_hcl.py --instanttensor # direct-I/O weight loading (about 60 s instead of 300 s)
+
+The head group also gets a poststart "warmup" task (upstream boot-shape warmup,
+runs once per start after /health, non-fatal).
 """
 import argparse, base64, gzip, io, pathlib, re, subprocess, sys, tarfile
 
@@ -27,6 +30,65 @@ def overlay_order(start_sh: pathlib.Path) -> list[str]:
     if not m:
         sys.exit("GLM53_OVERLAY_ORDER not found in start.sh")
     return [line.strip() for line in m.group(1).splitlines() if line.strip().endswith(".py")]
+
+WARMUP_RE = re.compile(r'    task "warmup" \{.*?\n    \}\n(?=  \}\n  group "worker" \{)', re.S)
+
+
+def strip_warmup(text: str) -> str:
+    """Remove a previously generated warmup task so the template is the plain two-task job."""
+    return WARMUP_RE.sub("", text, count=1)
+
+
+def warmup_task(text: str) -> str:
+    """Embed upstream scripts/boot-shape-warmup.sh as a poststart task of the head group.
+
+    It starts after the vLLM task, waits for /health, runs the warmup once and
+    exits 0 regardless of the outcome (the warmup is non-fatal upstream too), so
+    every start warms the DFlash/sampler/prefill shapes without an operator step.
+    """
+    script = (ROOT / "scripts" / "boot-shape-warmup.sh").read_bytes()
+    b64 = base64.b64encode(script).decode()
+    lines = "\n".join(b64[i:i + 76] for i in range(0, len(b64), 76))
+    m = re.search(r'"--host", "([^"]+)", "--port", "([^"]+)"', text)
+    if not m:
+        sys.exit("cannot find the API host/port in the head args")
+    api = f"http://{m.group(1)}:{m.group(2)}"
+    block = f'''    task "warmup" {{
+      driver = "docker"
+      lifecycle {{
+        hook = "poststart"
+        sidecar = false
+      }}
+      template {{
+        destination = "local/warmup.b64"
+        change_mode = "noop"
+        data = <<WARMUPB64
+{lines}
+WARMUPB64
+      }}
+      config {{
+        image = "%IMAGE%"
+        entrypoint = []
+        command = "/bin/bash"
+        args = ["-c", "base64 -d /local/warmup.b64 > /local/warmup.sh; until curl -fsS --max-time 3 {api}/health >/dev/null 2>&1; do sleep 10; done; GLM53_WARMUP_MAX_CONCURRENCY=4 GLM53_WARMUP_DFLASH_K=7 bash /local/warmup.sh {api} glm-5.3-flash || echo \\"warmup reported a problem (non-fatal)\\"; exit 0"]
+        network_mode = "host"
+      }}
+      resources {{
+        cpu = 500
+        memory = 1024
+      }}
+      logs {{
+        max_files = 2
+        max_file_size = 5
+      }}
+    }}
+'''
+    image = re.search(r'image = "([^"]+)"', text).group(1)
+    block = block.replace("%IMAGE%", image)
+    text, n = re.subn(r'(    \}\n)(  \}\n  group "worker" \{)', lambda mm: mm.group(1) + block + mm.group(2), text, count=1)
+    if n != 1:
+        sys.exit("cannot find the end of the head group")
+    return text
 
 def main() -> None:
     ap = argparse.ArgumentParser()
@@ -58,7 +120,7 @@ def main() -> None:
                 tar.addfile(info, f)
     payload = base64.b64encode(buf.getvalue()).decode()
 
-    text = a.template.read_text()
+    text = strip_warmup(a.template.read_text())
     text, n = re.subn(r"payload = '[A-Za-z0-9+/=]+'", "payload = '" + payload + "'", text)
     if n != 2:
         sys.exit(f"expected two payload strings in the template, found {n}")
@@ -90,6 +152,7 @@ def main() -> None:
         text, n = re.subn(r'(        DEFAULT_MAX_NEW_TOKENS = "65536"\n)', r'\1        INSTANTTENSOR_MAX_FREE_MEM_USAGE = "0.9"\n', text)
         if n != 2:
             sys.exit("expected two DEFAULT_MAX_NEW_TOKENS settings")
+    text = warmup_task(text)
     a.out.write_text(text)
     print(f"wrote {a.out} ({len(text)} bytes): {len(members)} payload members, exl3={'cooperative' if a.coop else 'stock'}, upstream {rev}", file=sys.stderr)
 

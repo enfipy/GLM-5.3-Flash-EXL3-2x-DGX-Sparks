@@ -8,6 +8,19 @@ dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 control="$GLM53_NOMAD_CONTROL/control-ssh"
 [ -x "$control" ] || { echo "missing $control (private control-host wrapper, see README)" >&2; exit 1; }
 nomad() { "$control" bash -s -- "$@" < "$GLM53_NOMAD_CONTROL/nomad-remote"; }
+usage() { echo "Usage: $0 {start [--vision] [--no-ablit] [--no-gen]|status|logs [head|worker|warmup] [-n N]|warmup|bench [args]|stop}" >&2; exit 2; }
+# Allocation IDs of the latest job version, one "id group" pair per line.
+latest_allocs() {
+  nomad job allocs -json glm53 2>/dev/null | python3 -c '
+import json, sys
+al = json.load(sys.stdin)
+if al:
+    v = max(a["JobVersion"] for a in al)
+    for a in al:
+        if a["JobVersion"] == v:
+            ts = a.get("TaskStates") or {}
+            print(a["ID"], a["TaskGroup"], a["ClientStatus"], " ".join("%s=%s" % (k, t["State"]) for k, t in sorted(ts.items())))'
+}
 case "${1:-start}" in
  start)
   vision=false; ablit=true; gen=true
@@ -17,7 +30,7 @@ case "${1:-start}" in
       --vision) vision=true ;;
       --no-ablit) ablit=false ;;
       --no-gen) gen=false ;;
-      *) echo "Usage: $0 start [--vision] [--no-ablit] [--no-gen]" >&2; exit 2 ;;
+      *) usage ;;
     esac
   done
   if ! systemctl is-active --quiet cloud-ctrl-nomad; then
@@ -50,24 +63,47 @@ tmp.chmod(p.stat().st_mode & 0o777)
 tmp.replace(p)
 PICONFIG
   fi
-  echo "Submitted glm53 (ablit=$ablit vision=$vision). Check readiness with: $0 status, then run: $0 warmup"
+  echo "Submitted glm53 (ablit=$ablit vision=$vision). The head's poststart task warms the model up once the API is healthy."
+  echo "Follow it with: $0 status  (warmup=dead means done) and: $0 logs warmup"
   ;;
  stop) nomad job stop -yes glm53 ;;
  warmup)
-  # Upstream boot-shape warmup: precompiles DFlash2 / sampler / prefill-chunk
-  # kernels so the first real requests do not pay JIT spikes. Run once after
-  # "status" reports API READY (about a minute with a warm cache volume).
+  # Upstream boot-shape warmup, the same thing the job's poststart "warmup"
+  # task runs after every start. Rerun it by hand after the API is READY if
+  # you want fresh kernels compiled again (about a minute with a warm cache).
   curl -fsS --max-time 3 "$GLM53_API/health" >/dev/null || { echo "API not ready" >&2; exit 1; }
   GLM53_WARMUP_MAX_CONCURRENCY=4 GLM53_WARMUP_DFLASH_K=7 \
     bash "$dir/../scripts/boot-shape-warmup.sh" "$GLM53_API" glm-5.3-flash
   ;;
  status)
   nomad job status glm53
+  echo
+  echo "Latest version tasks (vllm=running + warmup=dead is fully warmed up):"
+  latest_allocs | while read -r id group state tasks; do echo "  ${id:0:8} $group $state $tasks"; done
   if curl -fsS --max-time 3 "$GLM53_API/health" >/dev/null; then echo "API READY"; else echo "API NOT READY"; fi
+  ;;
+ logs)
+  # logs [head|worker|warmup] [-n N]: vLLM stderr of a rank, or the warmup task's output.
+  shift
+  which="${1:-head}"; [ $# -gt 0 ] && shift
+  n=100; if [ "${1:-}" = "-n" ]; then n="$2"; shift 2; fi
+  case "$which" in
+    head|warmup) group=head ;;
+    worker) group=worker ;;
+    *) usage ;;
+  esac
+  id="$(latest_allocs | awk -v g="$group" '$2==g{print $1; exit}')"
+  [ -n "$id" ] || { echo "no $group allocation in the latest job version" >&2; exit 1; }
+  if [ "$which" = warmup ]; then
+    nomad alloc logs -stdout -tail -n "$n" "$id" warmup
+    nomad alloc logs -stderr -tail -n "$n" "$id" warmup
+  else
+    nomad alloc logs -stderr -tail -n "$n" "$id" vllm
+  fi
   ;;
  bench)
   shift
   python3 "$dir/decode_bench.py" --url "$GLM53_API" "$@"
   ;;
- *) echo "Usage: $0 {start [--vision] [--no-ablit] [--no-gen]|stop|status|warmup|bench [args]}" >&2; exit 2 ;;
+ *) usage ;;
 esac
