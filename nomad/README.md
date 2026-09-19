@@ -192,9 +192,10 @@ TileLang / inductor caches so restarts do not recompile); worker
   Docker driver garbage-collects unused images 3 minutes after the last task
   that used them unless the client sets `gc { image_delay = "168h" }`; with
   the default a stopped job loses the local tag and the next start fails with
-  `pull access denied for glm53-flash-sm121`. Recover with `docker images`
-  (the layers usually survive untagged) and
-  `docker tag <id> $GLM53_IMAGE`, or `docker load` the saved tar.
+  `pull access denied for glm53-flash-sm121`. On the head `model.sh start`
+  reloads the saved tar by itself; on the worker `docker load` the tar again
+  (an untagged leftover in `docker images` may be an older build, check the
+  `glm53.recipe.stamp` label before re-tagging it).
 - enfis2 (Enfios) needs `ib_uverbs` loaded so `/dev/infiniband` exists
   (`modprobe ib_uverbs`); the image loads it at boot from the next release.
 - The Enfios thermal guard caps enfis2's GPU at 2200 MHz and drops to

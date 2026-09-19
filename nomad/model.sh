@@ -39,7 +39,14 @@ case "${1:-start}" in
     exit 1
   fi
   docker info >/dev/null 2>&1 || { echo "Cannot start: Docker is unavailable." >&2; exit 1; }
-  docker image inspect "$GLM53_IMAGE" >/dev/null 2>&1 || { echo "Image $GLM53_IMAGE is missing here; run $dir/setup.sh" >&2; exit 1; }
+  if ! docker image inspect "$GLM53_IMAGE" >/dev/null 2>&1; then
+    # Nomad's Docker driver drops unused images 3 minutes after the last task
+    # unless the client sets gc { image_delay }; reload the saved copy if there is one.
+    tar="$GLM53_WEIGHTS/images/$(printf '%s' "$GLM53_IMAGE" | tr '/:' '--').tar"
+    [ -f "$tar" ] || { echo "Image $GLM53_IMAGE is missing here and no $tar; run $dir/setup.sh" >&2; exit 1; }
+    echo "Image $GLM53_IMAGE was garbage-collected; reloading it from $tar (a few minutes)" >&2
+    docker load -i "$tar" >&2
+  fi
   # Regenerate the job from this checkout so a git pull is always reflected.
   # shellcheck disable=SC2086
   [ "$gen" = true ] && python3 "$dir/gen_hcl.py" $GLM53_GEN_FLAGS --image "$GLM53_IMAGE"
